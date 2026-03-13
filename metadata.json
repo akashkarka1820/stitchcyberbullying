@@ -1,0 +1,9 @@
+{
+  "name": "SafeSpace",
+  "description": "A safer social media platform powered by AI moderation to foster kind and respectful digital communities.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}

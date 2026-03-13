@@ -1,0 +1,15 @@
+@import url('https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;900&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Be Vietnam Pro", ui-sans-serif, system-ui, sans-serif;
+  --color-primary: #0d59f2;
+  --color-background-light: #f5f6f8;
+  --color-background-dark: #101622;
+}
+
+@layer base {
+  body {
+    @apply font-display bg-background-light text-slate-900 dark:bg-background-dark dark:text-slate-100;
+  }
+}
