@@ -1,8 +1,7 @@
-import { useState, FormEvent } from 'react';
+import React, { useState, FormEvent } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, Image as ImageIcon, Sparkles, ShieldCheck, AlertCircle, Send, X, MapPin, Smile } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI, Type } from "@google/genai";
 import { User } from '../types';
 
 interface NewPostProps {
@@ -13,41 +12,28 @@ export default function NewPost({ user }: NewPostProps) {
   const [content, setContent] = useState('');
   const [imageUrl, setImageUrl] = useState('');
   const [isModerating, setIsModerating] = useState(false);
-  const [moderationResult, setModerationResult] = useState<{ safe: boolean; reason?: string } | null>(null);
+  const [moderationResult, setModerationResult] = useState<{ safe: boolean; reason?: string; confidence?: number } | null>(null);
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
   const moderateContent = async (text: string) => {
+    if (!text.trim()) return { safe: true };
     setIsModerating(true);
     setModerationResult(null);
     
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `Analyze the following social media post for harmful content (hate speech, bullying, harassment, violence, or explicit content). 
-        Post: "${text}"
-        
-        Respond in JSON format with:
-        {
-          "safe": boolean,
-          "reason": "string explaining why if unsafe, or a positive encouragement if safe"
-        }`,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              safe: { type: Type.BOOLEAN },
-              reason: { type: Type.STRING }
-            },
-            required: ["safe", "reason"]
-          }
-        }
+      const response = await fetch('/api/comments/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
       });
 
-      const result = JSON.parse(response.text || '{"safe": false, "reason": "AI analysis failed"}');
-      setModerationResult(result);
+      const result = await response.json();
+      setModerationResult({
+        safe: result.safe,
+        reason: result.reason,
+        confidence: result.confidence,
+      });
       return result;
     } catch (err) {
       console.error("Moderation error:", err);
@@ -58,35 +44,61 @@ export default function NewPost({ user }: NewPostProps) {
     }
   };
 
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        setError("Image size must be less than 5MB");
+        return;
+      }
+      
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImageUrl(reader.result as string);
+        setError('');
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!content.trim()) return;
+    if (!content.trim() && !imageUrl) return;
 
     const result = await moderateContent(content);
     
     if (result.safe) {
+      console.log("Post is safe, proceeding to upload...");
       // Proceed to save post
       try {
+        const payload = {
+          user_id: user.id,
+          content,
+          image_url: imageUrl || "", 
+          location: 'Global'
+        };
+        console.log("Payload:", payload);
+
         const response = await fetch('/api/posts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            user_id: user.id,
-            content,
-            image_url: imageUrl || `https://picsum.photos/seed/${Date.now()}/800/800`,
-            location: 'Global'
-          }),
+          body: JSON.stringify(payload),
         });
 
         if (response.ok) {
+          console.log("Post saved successfully!");
           navigate('/home');
         } else {
-          setError("Failed to save post");
+          const data = await response.json();
+          console.error("Failed to save post:", data);
+          setError(data.error || "Failed to save post");
         }
       } catch (err) {
+        console.error("Connection error during post:", err);
         setError("Connection error");
       }
     } else {
+      console.warn("Post flagged as harmful!");
       // Record violation
       await fetch('/api/violations', {
         method: 'POST',
@@ -97,7 +109,6 @@ export default function NewPost({ user }: NewPostProps) {
           content_preview: content.substring(0, 100)
         }),
       });
-      // The user will see the moderation result in the UI
     }
   };
 
@@ -112,7 +123,7 @@ export default function NewPost({ user }: NewPostProps) {
         </div>
         <button 
           onClick={handleSubmit}
-          disabled={!content.trim() || isModerating}
+          disabled={(!content.trim() && !imageUrl) || isModerating}
           className="bg-primary disabled:opacity-50 text-white px-4 py-1.5 rounded-full font-bold text-sm flex items-center gap-2"
         >
           {isModerating ? 'Checking...' : 'Post'}
@@ -139,7 +150,7 @@ export default function NewPost({ user }: NewPostProps) {
             
             {imageUrl && (
               <div className="relative rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800">
-                <img src={imageUrl} alt="Preview" className="w-full aspect-video object-cover" referrerPolicy="no-referrer" />
+                <img src={imageUrl} alt="Preview" className="w-full aspect-video object-cover" />
                 <button 
                   onClick={() => setImageUrl('')}
                   className="absolute top-2 right-2 bg-black/50 text-white p-1.5 rounded-full hover:bg-black/70 transition-colors"
@@ -188,6 +199,11 @@ export default function NewPost({ user }: NewPostProps) {
                 <p className={`text-sm ${moderationResult.safe ? 'text-green-600' : 'text-red-600'}`}>
                   {moderationResult.reason}
                 </p>
+                {moderationResult.confidence && (
+                  <p className={`text-xs mt-1 ${moderationResult.safe ? 'text-green-500' : 'text-red-500'}`}>
+                    Confidence: {Math.round(moderationResult.confidence * 100)}%
+                  </p>
+                )}
                 {!moderationResult.safe && (
                   <p className="text-xs text-red-500 mt-2 font-medium">
                     Posting harmful content may result in account strikes. Please revise your post.
@@ -212,12 +228,19 @@ export default function NewPost({ user }: NewPostProps) {
       <footer className="p-4 border-t border-slate-100 dark:border-slate-800">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <button 
-              onClick={() => setImageUrl(`https://picsum.photos/seed/${Date.now()}/800/800`)}
-              className="text-primary hover:bg-primary/5 p-2 rounded-full transition-colors"
+            <input 
+              type="file" 
+              id="image-upload" 
+              accept="image/*" 
+              className="hidden" 
+              onChange={handleImageChange}
+            />
+            <label 
+              htmlFor="image-upload"
+              className="text-primary hover:bg-primary/5 p-2 rounded-full transition-colors cursor-pointer"
             >
               <ImageIcon className="w-6 h-6" />
-            </button>
+            </label>
             <button className="text-slate-400 hover:bg-slate-100 p-2 rounded-full transition-colors">
               <MapPin className="w-6 h-6" />
             </button>

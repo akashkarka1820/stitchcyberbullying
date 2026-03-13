@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Shield, Bell, Heart, MessageCircle, Share2, Bookmark, PlusSquare, Home as HomeIcon, User as UserIcon, MoreHorizontal, Sparkles } from 'lucide-react';
-import { motion } from 'motion/react';
-import { User, Post } from '../types';
+import { Shield, Bell, Heart, MessageCircle, Share2, Bookmark, PlusSquare, Home as HomeIcon, User as UserIcon, MoreHorizontal, Sparkles, AlertTriangle, Send, X } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { User, Post, Comment } from '../types';
 
 interface HomeProps {
   user: User;
@@ -12,6 +12,12 @@ interface HomeProps {
 export default function Home({ user, onLogout }: HomeProps) {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
+  const [commentText, setCommentText] = useState<Record<number, string>>({});
+  const [commentWarning, setCommentWarning] = useState<Record<number, string>>({});
+  const [submitting, setSubmitting] = useState<Record<number, boolean>>({});
+  const [expandedComments, setExpandedComments] = useState<Record<number, Comment[]>>({});
+  const [showComments, setShowComments] = useState<Record<number, boolean>>({});
+  const [likedPosts, setLikedPosts] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     fetch('/api/posts')
@@ -21,6 +27,86 @@ export default function Home({ user, onLogout }: HomeProps) {
         setLoading(false);
       });
   }, []);
+
+  const handleLike = async (postId: number) => {
+    const res = await fetch(`/api/posts/${postId}/like`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: user.id }),
+    });
+    const data = await res.json();
+    setPosts(prev =>
+      prev.map(p =>
+        p.id === postId
+          ? { ...p, likes_count: p.likes_count + (data.liked ? 1 : -1) }
+          : p
+      )
+    );
+    setLikedPosts(prev => {
+      const next = new Set(prev);
+      data.liked ? next.add(postId) : next.delete(postId);
+      return next;
+    });
+  };
+
+  const loadComments = async (postId: number) => {
+    const res = await fetch(`/api/posts/${postId}/comments`);
+    const data = await res.json();
+    setExpandedComments(prev => ({ ...prev, [postId]: data }));
+    setShowComments(prev => ({ ...prev, [postId]: !prev[postId] }));
+  };
+
+  const handleComment = async (postId: number) => {
+    const text = commentText[postId]?.trim();
+    if (!text) return;
+
+    setSubmitting(prev => ({ ...prev, [postId]: true }));
+    setCommentWarning(prev => ({ ...prev, [postId]: '' }));
+
+    try {
+      const res = await fetch(`/api/posts/${postId}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.id, content: text }),
+      });
+      const data = await res.json();
+
+      if (res.status === 403) {
+        setCommentWarning(prev => ({ ...prev, [postId]: data.error }));
+        return;
+      }
+
+      if (data.analysis?.is_cyberbullying) {
+        setCommentWarning(prev => ({
+          ...prev,
+          [postId]: `⚠️ This comment was flagged as potentially harmful (${Math.round(data.analysis.confidence * 100)}% confidence). ${data.moderation?.action || 'Warning issued.'}`,
+        }));
+      } else {
+        setCommentWarning(prev => ({ ...prev, [postId]: '' }));
+      }
+
+      // Update post comment count
+      setPosts(prev =>
+        prev.map(p =>
+          p.id === postId ? { ...p, comments_count: p.comments_count + 1 } : p
+        )
+      );
+
+      // Add to expanded comments if visible
+      if (showComments[postId] && data.comment) {
+        setExpandedComments(prev => ({
+          ...prev,
+          [postId]: [data.comment, ...(prev[postId] || [])],
+        }));
+      }
+
+      setCommentText(prev => ({ ...prev, [postId]: '' }));
+    } catch (err) {
+      setCommentWarning(prev => ({ ...prev, [postId]: 'Failed to post comment.' }));
+    } finally {
+      setSubmitting(prev => ({ ...prev, [postId]: false }));
+    }
+  };
 
   return (
     <div className="relative flex h-auto min-h-screen w-full flex-col bg-background-light dark:bg-background-dark overflow-x-hidden">
@@ -99,17 +185,25 @@ export default function Home({ user, onLogout }: HomeProps) {
                 </div>
                 <button className="text-slate-400"><MoreHorizontal className="w-5 h-5" /></button>
               </div>
-              <div className="w-full aspect-square bg-slate-100 overflow-hidden">
-                <img className="w-full h-full object-cover" src={post.image_url} alt="Post content" referrerPolicy="no-referrer" />
-              </div>
+              {post.image_url && (
+                <div className="w-full aspect-square bg-slate-100 overflow-hidden">
+                  <img className="w-full h-full object-cover" src={post.image_url} alt="Post content" />
+                </div>
+              )}
               <div className="p-4">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-4">
-                    <button className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300">
-                      <Heart className="w-7 h-7" />
+                    <button 
+                      onClick={() => handleLike(post.id)}
+                      className={`flex items-center gap-1.5 transition-colors ${likedPosts.has(post.id) ? 'text-red-500' : 'text-slate-700 dark:text-slate-300'}`}
+                    >
+                      <Heart className={`w-7 h-7 ${likedPosts.has(post.id) ? 'fill-red-500' : ''}`} />
                       <span className="text-sm font-bold">{post.likes_count}</span>
                     </button>
-                    <button className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300">
+                    <button 
+                      onClick={() => loadComments(post.id)}
+                      className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300"
+                    >
                       <MessageCircle className="w-7 h-7" />
                       <span className="text-sm font-bold">{post.comments_count}</span>
                     </button>
@@ -126,9 +220,68 @@ export default function Home({ user, onLogout }: HomeProps) {
                     <span className="font-bold mr-2">{post.username}</span>
                     {post.content}
                   </p>
-                  <button className="text-xs text-slate-500 font-medium mt-1">View all {post.comments_count} comments</button>
+                  <button 
+                    onClick={() => loadComments(post.id)}
+                    className="text-xs text-slate-500 font-medium mt-1"
+                  >
+                    {showComments[post.id] ? 'Hide comments' : `View all ${post.comments_count} comments`}
+                  </button>
                 </div>
+
+                {/* Expanded Comments */}
+                <AnimatePresence>
+                  {showComments[post.id] && expandedComments[post.id] && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="mt-3 space-y-2 max-h-60 overflow-y-auto"
+                    >
+                      {expandedComments[post.id].length === 0 ? (
+                        <p className="text-xs text-slate-400 text-center py-2">No comments yet. Be the first!</p>
+                      ) : (
+                        expandedComments[post.id].map((comment) => (
+                          <div key={comment.id} className={`flex gap-2 p-2 rounded-lg ${comment.is_flagged ? 'bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800' : ''}`}>
+                            <div className="size-6 rounded-full bg-slate-200 overflow-hidden shrink-0 mt-0.5">
+                              <img className="w-full h-full object-cover" src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${comment.username}`} alt={comment.username} referrerPolicy="no-referrer" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs text-slate-800 dark:text-slate-200">
+                                <span className="font-bold mr-1">{comment.username}</span>
+                                {comment.content}
+                              </p>
+                              {comment.is_flagged && (
+                                <div className="flex items-center gap-1 mt-1">
+                                  <AlertTriangle className="w-3 h-3 text-red-500" />
+                                  <span className="text-[10px] text-red-500 font-medium">Flagged as harmful</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
                 
+                {/* Warning Message */}
+                <AnimatePresence>
+                  {commentWarning[post.id] && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -5 }}
+                      className="mt-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl flex items-start gap-2"
+                    >
+                      <AlertTriangle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                      <p className="text-xs text-red-600 dark:text-red-400">{commentWarning[post.id]}</p>
+                      <button onClick={() => setCommentWarning(prev => ({ ...prev, [post.id]: '' }))} className="text-red-400 shrink-0">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
                 {/* AI Protected Comment Input */}
                 <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
                   <div className="relative group">
@@ -136,13 +289,24 @@ export default function Home({ user, onLogout }: HomeProps) {
                       className="w-full pl-4 pr-32 py-2.5 bg-background-light dark:bg-background-dark border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 placeholder:text-slate-400" 
                       placeholder="Add a positive comment..." 
                       type="text"
+                      value={commentText[post.id] || ''}
+                      onChange={(e) => setCommentText(prev => ({ ...prev, [post.id]: e.target.value }))}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !submitting[post.id]) handleComment(post.id);
+                      }}
                     />
                     <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2">
                       <div className="flex items-center gap-1 px-2 py-1 bg-primary/10 text-primary rounded-full">
                         <Sparkles className="w-3 h-3" />
                         <span className="text-[10px] font-bold uppercase tracking-wider">AI Guarded</span>
                       </div>
-                      <button className="text-primary font-bold text-sm px-2">Post</button>
+                      <button 
+                        onClick={() => handleComment(post.id)}
+                        disabled={submitting[post.id] || !commentText[post.id]?.trim()}
+                        className="text-primary font-bold text-sm px-2 disabled:opacity-50"
+                      >
+                        {submitting[post.id] ? '...' : <Send className="w-4 h-4" />}
+                      </button>
                     </div>
                   </div>
                 </div>

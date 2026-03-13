@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { ShieldAlert, Users, MessageSquare, AlertTriangle, TrendingUp, ChevronRight, Search, Filter, Bell, LogOut } from 'lucide-react';
+import { ShieldAlert, Users, MessageSquare, AlertTriangle, TrendingUp, Search, Filter, Bell, LogOut, Eye } from 'lucide-react';
 import { motion } from 'motion/react';
-import { User, Post, Violation } from '../types';
+import { User, Violation } from '../types';
 
 interface AdminDashboardProps {
   user: User;
@@ -13,38 +13,44 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
   const [stats, setStats] = useState({
     totalUsers: 0,
     totalPosts: 0,
+    totalComments: 0,
     totalViolations: 0,
-    activeStrikes: 0
+    flaggedComments: 0,
+    activeStrikes: 0,
+    blockedUsers: 0,
+    detectionRate: 0,
   });
   const [recentViolations, setRecentViolations] = useState<Violation[]>([]);
+  const [modelMetrics, setModelMetrics] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // In a real app, we'd have a dedicated stats endpoint
-    // For now, we'll fetch posts and violations to mock it
     const fetchData = async () => {
       try {
-        const [postsRes, violationsRes] = await Promise.all([
-          fetch('/api/posts'),
-          fetch('/api/user/1/strikes') // Mocking for demo
+        const [statsRes, violationsRes, metricsRes] = await Promise.all([
+          fetch('/api/admin/stats'),
+          fetch('/api/admin/violations'),
+          fetch('/api/admin/model-metrics'),
         ]);
+
+        const statsData = await statsRes.json();
+        const violationsData = await violationsRes.json();
         
-        const posts = await postsRes.json();
-        const violations = await violationsRes.json();
-        
-        setStats({
-          totalUsers: 1240,
-          totalPosts: posts.length,
-          totalViolations: 45,
-          activeStrikes: 12
-        });
-        setRecentViolations(violations);
+        setStats(statsData);
+        setRecentViolations(violationsData.slice(0, 10));
+
+        if (metricsRes.ok) {
+          const metricsData = await metricsRes.json();
+          setModelMetrics(metricsData);
+        }
+
         setLoading(false);
       } catch (err) {
         console.error(err);
+        setLoading(false);
       }
     };
-    
+
     fetchData();
   }, []);
 
@@ -98,7 +104,11 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
           <div className="flex items-center gap-6">
             <button className="relative text-slate-400 hover:text-white">
               <Bell className="w-6 h-6" />
-              <span className="absolute -top-1 -right-1 bg-red-500 size-4 rounded-full text-[10px] font-bold flex items-center justify-center text-white">3</span>
+              {stats.totalViolations > 0 && (
+                <span className="absolute -top-1 -right-1 bg-red-500 size-4 rounded-full text-[10px] font-bold flex items-center justify-center text-white">
+                  {stats.totalViolations > 9 ? '9+' : stats.totalViolations}
+                </span>
+              )}
             </button>
             <div className="flex items-center gap-3 pl-6 border-l border-slate-800">
               <div className="text-right">
@@ -139,7 +149,7 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                   <div className={`p-3 rounded-xl bg-${stat.color}-500/10 text-${stat.color}-500`}>
                     <stat.icon className="w-6 h-6" />
                   </div>
-                  <span className="text-green-500 text-xs font-bold">+12%</span>
+                  <span className="text-green-500 text-xs font-bold">Live</span>
                 </div>
                 <p className="text-slate-500 text-sm font-medium">{stat.label}</p>
                 <p className="text-3xl font-bold text-white mt-1">{stat.value.toLocaleString()}</p>
@@ -152,27 +162,29 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
             <div className="col-span-2 bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
               <div className="p-6 border-b border-slate-800 flex justify-between items-center">
                 <h3 className="font-bold text-white">Recent AI Flagged Content</h3>
-                <button className="text-red-500 text-sm font-bold hover:underline">View All</button>
+                <span className="text-sm text-slate-500">{stats.flaggedComments} total flagged</span>
               </div>
               <div className="divide-y divide-slate-800">
                 {loading ? (
                   <div className="p-12 text-center text-slate-500">Loading violations...</div>
+                ) : recentViolations.length === 0 ? (
+                  <div className="p-12 text-center text-slate-500">No violations recorded yet. The AI moderation system is active.</div>
                 ) : (
                   recentViolations.map((v) => (
                     <div key={v.id} className="p-4 flex items-center gap-4 hover:bg-slate-800/50 transition-all">
                       <div className="size-10 rounded-full bg-slate-800 overflow-hidden">
-                        <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=user${v.user_id}`} alt="User" className="w-full h-full" referrerPolicy="no-referrer" />
+                        <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${v.username || `user${v.user_id}`}`} alt="User" className="w-full h-full" referrerPolicy="no-referrer" />
                       </div>
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-bold text-white">User #{v.user_id}</span>
+                          <span className="text-sm font-bold text-white">{v.username || `User #${v.user_id}`}</span>
                           <span className="text-[10px] px-2 py-0.5 bg-red-500/10 text-red-500 rounded-full font-bold uppercase tracking-wider">{v.type}</span>
                         </div>
                         <p className="text-xs text-slate-400 mt-1 truncate max-w-md">"{v.content_preview}"</p>
                       </div>
                       <div className="text-right">
-                        <p className="text-xs text-slate-500">{new Date(v.timestamp).toLocaleTimeString()}</p>
-                        <button className="text-xs font-bold text-red-500 hover:underline mt-1">Review</button>
+                        <p className="text-xs text-slate-500">{v.action_taken}</p>
+                        <p className="text-[10px] text-slate-600 mt-1">{new Date(v.timestamp).toLocaleString()}</p>
                       </div>
                     </div>
                   ))
@@ -180,46 +192,82 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
               </div>
             </div>
 
-            {/* System Health */}
+            {/* AI Model Health & Comparison */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-              <h3 className="font-bold text-white mb-6">AI Moderation Health</h3>
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="font-bold text-white">AI Moderation Comparison</h3>
+                <button 
+                  onClick={async () => {
+                    const btn = document.getElementById('retrain-btn');
+                    if (btn) (btn as HTMLButtonElement).disabled = true;
+                    setStats(prev => ({ ...prev, detectionRate: 0 })); // Reset UI indicator
+                    
+                    try {
+                      const res = await fetch('/api/admin/model-retrain', { method: 'POST' });
+                      const data = await res.json();
+                      if (res.ok) {
+                        alert("✅ Retraining complete! Metrics updated.");
+                        window.location.reload();
+                      } else {
+                        alert("❌ Training failed: " + data.error);
+                      }
+                    } catch (err) {
+                      alert("❌ Connection error.");
+                    } finally {
+                      if (btn) (btn as HTMLButtonElement).disabled = false;
+                    }
+                  }}
+                  id="retrain-btn"
+                  className="flex items-center gap-2 px-3 py-1.5 bg-red-500/10 text-red-500 hover:bg-red-500/20 rounded-lg text-xs font-bold transition-all border border-red-500/20"
+                >
+                  <TrendingUp className="w-4 h-4" />
+                  Rerun All Algorithms
+                </button>
+              </div>
+
               <div className="space-y-6">
-                <div>
-                  <div className="flex justify-between text-sm mb-2">
-                    <span className="text-slate-400">Accuracy Rate</span>
-                    <span className="text-white font-bold">98.4%</span>
+                {modelMetrics?.all_results ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-800 text-slate-500 uppercase">
+                          <th className="pb-3 pr-2">Algorithm</th>
+                          <th className="pb-3 px-2">Accuracy</th>
+                          <th className="pb-3 px-2">F1 Score</th>
+                          <th className="pb-3 px-2">Precision</th>
+                          <th className="pb-3 pl-2">Recall</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800">
+                        {Object.entries(modelMetrics.all_results).map(([algo, m]: any) => (
+                          <tr key={algo} className={algo === modelMetrics.best_model ? "text-primary font-bold bg-primary/5" : "text-slate-400"}>
+                            <td className="py-3 pr-2 flex items-center gap-2">
+                              {algo}
+                              {algo === modelMetrics.best_model && <span className="text-[8px] bg-primary text-white px-1 rounded uppercase">Best</span>}
+                            </td>
+                            <td className="py-3 px-2">{(m.accuracy * 100).toFixed(1)}%</td>
+                            <td className="py-3 px-2">{(m.f1_score * 100).toFixed(1)}%</td>
+                            <td className="py-3 px-2">{(m.precision * 100).toFixed(1)}%</td>
+                            <td className="py-3 pl-2">{(m.recall * 100).toFixed(1)}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                  <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
-                    <div className="h-full bg-green-500 w-[98.4%]"></div>
+                ) : (
+                  <div className="text-center py-4 text-slate-500 italic">
+                    Loading model comparison data...
                   </div>
-                </div>
-                <div>
-                  <div className="flex justify-between text-sm mb-2">
-                    <span className="text-slate-400">Response Time</span>
-                    <span className="text-white font-bold">142ms</span>
-                  </div>
-                  <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
-                    <div className="h-full bg-blue-500 w-[85%]"></div>
-                  </div>
-                </div>
-                <div>
-                  <div className="flex justify-between text-sm mb-2">
-                    <span className="text-slate-400">False Positives</span>
-                    <span className="text-white font-bold">0.2%</span>
-                  </div>
-                  <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
-                    <div className="h-full bg-amber-500 w-[5%]"></div>
-                  </div>
-                </div>
+                )}
               </div>
 
               <div className="mt-8 p-4 bg-red-500/5 border border-red-500/10 rounded-xl">
                 <div className="flex items-center gap-3 mb-2">
                   <AlertTriangle className="text-red-500 w-5 h-5" />
-                  <span className="text-sm font-bold text-white">System Alert</span>
+                  <span className="text-sm font-bold text-white">System Status</span>
                 </div>
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  Increased activity detected in "Politics" topic. AI sensitivity adjusted to level 4.
+                  AI moderation is active. Best model (<span className="text-primary font-bold">{modelMetrics?.best_model || 'Loading...'}</span>) is currently guarding {stats.totalComments} comments analyzed across {stats.totalPosts} posts.
                 </p>
               </div>
             </div>

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Search, Filter, MoreVertical, ShieldAlert, UserX, CheckCircle, Mail, Trash2 } from 'lucide-react';
+import { ArrowLeft, Search, Filter, MoreVertical, ShieldAlert, UserX, CheckCircle, Mail, Trash2, Ban, Unlock } from 'lucide-react';
 import { motion } from 'motion/react';
 import { User } from '../types';
 
@@ -10,20 +10,51 @@ export default function AdminUserManagement() {
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
-    // Mock user list
-    const mockUsers: User[] = [
-      { id: 1, full_name: 'Akash Karka', email: 'akash@example.com', username: 'akash', role: 'admin', strikes: 0, status: 'active', joined_at: new Date().toISOString() },
-      { id: 2, full_name: 'John Doe', email: 'john@example.com', username: 'johndoe', role: 'user', strikes: 1, status: 'active', joined_at: new Date().toISOString() },
-      { id: 3, full_name: 'Jane Smith', email: 'jane@example.com', username: 'janesmith', role: 'user', strikes: 0, status: 'active', joined_at: new Date().toISOString() },
-      { id: 4, full_name: 'Bad Actor', email: 'bad@example.com', username: 'troll123', role: 'user', strikes: 2, status: 'active', joined_at: new Date().toISOString() },
-      { id: 5, full_name: 'Alice Cooper', email: 'alice@example.com', username: 'alice', role: 'user', strikes: 0, status: 'active', joined_at: new Date().toISOString() },
-    ];
-    
-    setTimeout(() => {
-      setUsers(mockUsers);
-      setLoading(false);
-    }, 500);
+    fetchUsers();
   }, []);
+
+  const fetchUsers = async () => {
+    try {
+      const res = await fetch('/api/admin/users');
+      const data = await res.json();
+      setUsers(data);
+      setLoading(false);
+    } catch (err) {
+      console.error('Failed to fetch users:', err);
+      setLoading(false);
+    }
+  };
+
+  const toggleUserStatus = async (userId: number, currentStatus: string) => {
+    const newStatus = currentStatus === 'active' ? 'restricted' : 'active';
+    try {
+      const res = await fetch(`/api/admin/users/${userId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (res.ok) {
+        fetchUsers(); // Refresh the list
+      }
+    } catch (err) {
+      console.error('Failed to update user status:', err);
+    }
+  };
+
+  const banUser = async (userId: number) => {
+    try {
+      const res = await fetch(`/api/admin/users/${userId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'banned' }),
+      });
+      if (res.ok) {
+        fetchUsers();
+      }
+    } catch (err) {
+      console.error('Failed to ban user:', err);
+    }
+  };
 
   const filteredUsers = users.filter(u => 
     u.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -39,6 +70,7 @@ export default function AdminUserManagement() {
             <ArrowLeft className="w-6 h-6" />
           </Link>
           <h1 className="text-xl font-bold text-white">User Management</h1>
+          <span className="text-sm text-slate-500 ml-2">({users.length} users)</span>
         </div>
         
         <div className="flex items-center gap-4">
@@ -66,23 +98,25 @@ export default function AdminUserManagement() {
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">User</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Role</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Strikes</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Violations</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Joined</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
               {loading ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-slate-500">Loading user database...</td>
+                  <td colSpan={7} className="px-6 py-12 text-center text-slate-500">Loading user database...</td>
                 </tr>
               ) : filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-slate-500">No users found matching your search.</td>
+                  <td colSpan={7} className="px-6 py-12 text-center text-slate-500">No users found matching your search.</td>
                 </tr>
               ) : (
-                filteredUsers.map((user) => (
+                filteredUsers.map((u) => (
                   <motion.tr 
-                    key={user.id}
+                    key={u.id}
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     className="hover:bg-slate-800/30 transition-all group"
@@ -90,34 +124,43 @@ export default function AdminUserManagement() {
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
                         <div className="size-10 rounded-full bg-slate-800 overflow-hidden border border-slate-700">
-                          <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}`} alt={user.username} className="w-full h-full" referrerPolicy="no-referrer" />
+                          <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${u.username}`} alt={u.username} className="w-full h-full" referrerPolicy="no-referrer" />
                         </div>
                         <div>
-                          <p className="text-sm font-bold text-white">{user.full_name}</p>
-                          <p className="text-xs text-slate-500">{user.email}</p>
+                          <p className="text-sm font-bold text-white">{u.full_name}</p>
+                          <p className="text-xs text-slate-500">{u.email}</p>
                         </div>
                       </div>
                     </td>
                     <td className="px-6 py-4">
                       <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
-                        user.role === 'admin' ? 'bg-red-500/10 text-red-500' : 'bg-blue-500/10 text-blue-500'
+                        u.role === 'admin' ? 'bg-red-500/10 text-red-500' : 'bg-blue-500/10 text-blue-500'
                       }`}>
-                        {user.role}
+                        {u.role}
                       </span>
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex gap-1">
                         {[1, 2, 3].map(i => (
-                          <div key={i} className={`size-2 rounded-full ${i <= user.strikes ? 'bg-red-500' : 'bg-slate-700'}`}></div>
+                          <div key={i} className={`size-2 rounded-full ${i <= u.strikes ? 'bg-red-500' : 'bg-slate-700'}`}></div>
                         ))}
+                        <span className="text-xs text-slate-500 ml-2">{u.strikes}/3</span>
                       </div>
                     </td>
                     <td className="px-6 py-4">
+                      <span className="text-sm text-slate-400">{u.violation_count || 0}</span>
+                    </td>
+                    <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
-                        {user.strikes >= 3 ? (
+                        {u.status === 'banned' ? (
                           <>
                             <UserX className="w-4 h-4 text-red-500" />
-                            <span className="text-xs text-red-500 font-medium">Suspended</span>
+                            <span className="text-xs text-red-500 font-medium">Banned</span>
+                          </>
+                        ) : u.status === 'restricted' ? (
+                          <>
+                            <ShieldAlert className="w-4 h-4 text-amber-500" />
+                            <span className="text-xs text-amber-500 font-medium">Restricted</span>
                           </>
                         ) : (
                           <>
@@ -127,20 +170,39 @@ export default function AdminUserManagement() {
                         )}
                       </div>
                     </td>
+                    <td className="px-6 py-4">
+                      <span className="text-xs text-slate-500">{new Date(u.joined_at).toLocaleDateString()}</span>
+                    </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button className="p-2 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-white" title="Send Warning">
-                          <Mail className="w-4 h-4" />
-                        </button>
-                        <button className="p-2 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-red-500" title="Issue Strike">
-                          <ShieldAlert className="w-4 h-4" />
-                        </button>
-                        <button className="p-2 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-red-500" title="Delete User">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                        <button className="p-2 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-white">
-                          <MoreVertical className="w-4 h-4" />
-                        </button>
+                        {u.role !== 'admin' && (
+                          <>
+                            {u.status !== 'active' ? (
+                              <button 
+                                onClick={() => toggleUserStatus(u.id, u.status)}
+                                className="p-2 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-green-500" 
+                                title="Unblock User"
+                              >
+                                <Unlock className="w-4 h-4" />
+                              </button>
+                            ) : (
+                              <button 
+                                onClick={() => toggleUserStatus(u.id, u.status)}
+                                className="p-2 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-amber-500" 
+                                title="Restrict User"
+                              >
+                                <ShieldAlert className="w-4 h-4" />
+                              </button>
+                            )}
+                            <button 
+                              onClick={() => banUser(u.id)}
+                              className="p-2 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-red-500" 
+                              title="Ban User"
+                            >
+                              <Ban className="w-4 h-4" />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </motion.tr>
