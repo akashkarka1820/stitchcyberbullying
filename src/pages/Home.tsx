@@ -63,7 +63,61 @@ export default function Home({ user, onLogout }: HomeProps) {
     setSubmitting(prev => ({ ...prev, [postId]: true }));
     setCommentWarning(prev => ({ ...prev, [postId]: '' }));
 
+    // Helper to show a comment locally as flagged without saving it
+    const showFakeBlockedComment = (warningMessage: string) => {
+      const fakeComment = {
+        id: Date.now(), // temporary local ID
+        content: text,
+        username: user.username,
+        is_flagged: 1,
+        created_at: new Date().toISOString()
+      };
+      
+      setExpandedComments(prev => ({
+        ...prev,
+        [postId]: [fakeComment, ...(prev[postId] || [])],
+      }));
+      // Ensure comments section is visible to see it
+      setShowComments(prev => ({ ...prev, [postId]: true }));
+      // Show strike warning
+      setCommentWarning(prev => ({
+        ...prev,
+        [postId]: '⚠ ' + warningMessage,
+      }));
+      setCommentText(prev => ({ ...prev, [postId]: '' }));
+    };
+
     try {
+      // ─── STEP 1: Frontend pre-check with ML API ─────────────────────
+      let mlBlocked = false;
+      try {
+        const mlRes = await fetch('/api/comments/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text }),
+        });
+        if (mlRes.ok) {
+          const mlData = await mlRes.json();
+          if (mlData.is_cyberbullying) {
+            mlBlocked = true;
+            showFakeBlockedComment('This content contains cyberbullying. A strike has been added to your account.');
+          }
+        }
+      } catch {
+        // Fall through to backend validation
+      }
+
+      if (mlBlocked) {
+        // Still need to trigger the backend to actually record the strike
+        fetch(`/api/posts/${postId}/comments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: user.id, content: text }),
+        }).catch(() => {});
+        return;
+      }
+
+      // ─── STEP 2: Submit to backend ──────────────────────────────────
       const res = await fetch(`/api/posts/${postId}/comments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -76,33 +130,29 @@ export default function Home({ user, onLogout }: HomeProps) {
         return;
       }
 
-      if (data.analysis?.is_cyberbullying) {
-        setCommentWarning(prev => ({
-          ...prev,
-          [postId]: `⚠️ This comment was flagged as potentially harmful (${Math.round(data.analysis.confidence * 100)}% confidence). ${data.moderation?.action || 'Warning issued.'}`,
-        }));
-      } else {
-        setCommentWarning(prev => ({ ...prev, [postId]: '' }));
+      if (data.blocked) {
+        showFakeBlockedComment('This content contains cyberbullying. A strike has been added to your account.');
+        return;
       }
 
-      // Update post comment count
+      // ─── Safe comment accepted ──────────────────────────────────────
+      setCommentWarning(prev => ({ ...prev, [postId]: '' }));
+      setCommentText(prev => ({ ...prev, [postId]: '' }));
+
       setPosts(prev =>
         prev.map(p =>
           p.id === postId ? { ...p, comments_count: p.comments_count + 1 } : p
         )
       );
 
-      // Add to expanded comments if visible
       if (showComments[postId] && data.comment) {
         setExpandedComments(prev => ({
           ...prev,
           [postId]: [data.comment, ...(prev[postId] || [])],
         }));
       }
-
-      setCommentText(prev => ({ ...prev, [postId]: '' }));
     } catch (err) {
-      setCommentWarning(prev => ({ ...prev, [postId]: 'Failed to post comment.' }));
+      setCommentWarning(prev => ({ ...prev, [postId]: 'Failed to post comment. Please try again.' }));
     } finally {
       setSubmitting(prev => ({ ...prev, [postId]: false }));
     }
@@ -250,7 +300,7 @@ export default function Home({ user, onLogout }: HomeProps) {
                                 <span className="font-bold mr-1">{comment.username}</span>
                                 {comment.content}
                               </p>
-                              {comment.is_flagged && (
+                              {!!comment.is_flagged && (
                                 <div className="flex items-center gap-1 mt-1">
                                   <AlertTriangle className="w-3 h-3 text-red-500" />
                                   <span className="text-[10px] text-red-500 font-medium">Flagged as harmful</span>
@@ -268,15 +318,15 @@ export default function Home({ user, onLogout }: HomeProps) {
                 <AnimatePresence>
                   {commentWarning[post.id] && (
                     <motion.div
-                      initial={{ opacity: 0, y: -5 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -5 }}
-                      className="mt-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl flex items-start gap-2"
+                      initial={{ opacity: 0, scale: 0.98 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.98 }}
+                      className="mt-3 p-3 bg-red-100 dark:bg-red-900/30 border-2 border-red-400 dark:border-red-600 rounded-xl flex items-start gap-2"
                     >
-                      <AlertTriangle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
-                      <p className="text-xs text-red-600 dark:text-red-400">{commentWarning[post.id]}</p>
-                      <button onClick={() => setCommentWarning(prev => ({ ...prev, [post.id]: '' }))} className="text-red-400 shrink-0">
-                        <X className="w-3 h-3" />
+                      <AlertTriangle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+                      <p className="text-sm text-red-700 dark:text-red-300 font-bold flex-1">{commentWarning[post.id]}</p>
+                      <button onClick={() => setCommentWarning(prev => ({ ...prev, [post.id]: '' }))} className="text-red-500 shrink-0">
+                        <X className="w-4 h-4" />
                       </button>
                     </motion.div>
                   )}

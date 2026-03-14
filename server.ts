@@ -152,28 +152,27 @@ function handleModeration(userId: number): { action: string; blocked: boolean } 
   const newStrikes = user.strikes + 1;
   let action = "";
   let blocked = false;
-  let blockedUntil = null;
+  let blockedUntil: string | null = null;
+  let newStatus = 'active';
 
   if (newStrikes === 1) {
-    action = "Warning issued";
+    action = "this content is cyberbullying warning";
   } else if (newStrikes === 2) {
     action = "10-minute block";
     blocked = true;
     blockedUntil = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-  } else if (newStrikes === 3) {
-    action = "24-hour block";
-    blocked = true;
-    blockedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    newStatus = "restricted";
   } else {
-    action = "Permanent ban";
+    action = "Permanent block";
     blocked = true;
     blockedUntil = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
+    newStatus = "banned";
   }
 
   // Update user
   if (blockedUntil) {
-    db.prepare("UPDATE users SET strikes = ?, status = 'restricted', blocked_until = ? WHERE id = ?").run(
-      newStrikes, blockedUntil, userId
+    db.prepare("UPDATE users SET strikes = ?, status = ?, blocked_until = ? WHERE id = ?").run(
+      newStrikes, newStatus, blockedUntil, userId
     );
   } else {
     db.prepare("UPDATE users SET strikes = ? WHERE id = ?").run(newStrikes, userId);
@@ -231,7 +230,9 @@ async function startServer() {
       return res.status(400).json({ error: "Email and password are required" });
     }
 
-    const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email) as any;
+    const identifier = email.trim().toLowerCase();
+    const user = db.prepare("SELECT * FROM users WHERE LOWER(email) = ? OR LOWER(username) = ?").get(identifier, identifier) as any;
+    
     if (!user) {
       return res.status(401).json({ error: "Invalid credentials" });
     }
@@ -344,6 +345,20 @@ async function startServer() {
     }
   });
 
+  // ─── Delete Post ──────────────────────────────────────────────────────
+  app.delete("/api/posts/:postId", (req, res) => {
+    const { postId } = req.params;
+    try {
+      db.prepare("DELETE FROM comments WHERE post_id = ?").run(postId);
+      db.prepare("DELETE FROM likes WHERE post_id = ?").run(postId);
+      db.prepare("DELETE FROM posts WHERE id = ?").run(postId);
+      res.json({ success: true, message: "Post deleted successfully" });
+    } catch (err: any) {
+      console.error("Delete post error:", err);
+      res.status(500).json({ error: "Failed to delete post" });
+    }
+  });
+
   // ═══════════════════════════════════════════════════════════════════════
   // COMMENT ROUTES
   // ═══════════════════════════════════════════════════════════════════════
@@ -382,26 +397,32 @@ async function startServer() {
       const isFlagged = analysis.is_cyberbullying;
       const confidence = analysis.confidence || 0;
 
-      // Insert the comment
+      // ─── BLOCK harmful comments — do NOT save them ─────────────────
+      if (isFlagged) {
+        const moderationResult = handleModeration(user_id);
+
+        // Record violation (but no comment saved)
+        db.prepare(
+          "INSERT INTO violations (user_id, content, confidence, action_taken, type) VALUES (?, ?, ?, ?, ?)"
+        ).run(user_id, content, confidence, moderationResult.action, "cyberbullying");
+
+        return res.status(400).json({
+          blocked: true,
+          error: "⚠️ This comment was blocked because it contains harmful or cyberbullying content. A strike has been added to your account.",
+          moderation: moderationResult,
+          analysis: { is_cyberbullying: true, confidence, prediction: analysis.prediction },
+        });
+      }
+
+      // ─── Safe comment — insert normally ────────────────────────────
       const info = db
         .prepare(
           "INSERT INTO comments (post_id, user_id, content, is_flagged, confidence, bullying_type) VALUES (?, ?, ?, ?, ?, ?)"
         )
-        .run(postId, user_id, content, isFlagged ? 1 : 0, confidence, analysis.prediction);
+        .run(postId, user_id, content, 0, confidence, analysis.prediction);
 
       // Update comment count
       db.prepare("UPDATE posts SET comments_count = comments_count + 1 WHERE id = ?").run(postId);
-
-      // If cyberbullying detected, handle moderation
-      let moderationResult = null;
-      if (isFlagged) {
-        moderationResult = handleModeration(user_id);
-
-        // Record violation
-        db.prepare(
-          "INSERT INTO violations (user_id, comment_id, content, confidence, action_taken, type) VALUES (?, ?, ?, ?, ?, ?)"
-        ).run(user_id, info.lastInsertRowid, content, confidence, moderationResult.action, "cyberbullying");
-      }
 
       const comment = db
         .prepare(
@@ -414,12 +435,8 @@ async function startServer() {
 
       res.json({
         comment,
-        analysis: {
-          is_cyberbullying: isFlagged,
-          confidence,
-          prediction: analysis.prediction,
-        },
-        moderation: moderationResult,
+        analysis: { is_cyberbullying: false, confidence, prediction: analysis.prediction },
+        moderation: null,
       });
     } catch (e) {
       console.error("Comment error:", e);
@@ -509,6 +526,40 @@ async function startServer() {
     }));
 
     res.json(mapped);
+  });
+
+  app.get("/api/users/:userId/safety-stats", (req, res) => {
+    const { userId } = req.params;
+    const user = db.prepare("SELECT strikes, status FROM users WHERE id = ?").get(userId) as any;
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const receivedComments = db.prepare(
+      `SELECT COUNT(comments.id) as total, 
+              SUM(CASE WHEN is_flagged = 1 THEN 1 ELSE 0 END) as flagged
+       FROM comments 
+       JOIN posts ON comments.post_id = posts.id
+       WHERE posts.user_id = ? AND comments.user_id != ?`
+    ).get(userId, userId) as any;
+
+    const totalPosts = (db.prepare("SELECT COUNT(*) as count FROM posts WHERE user_id = ?").get(userId) as any).count;
+    
+    // Global metric: total blocked users in the platform
+    const blockedUsers = (db.prepare("SELECT COUNT(*) as count FROM users WHERE status = 'restricted' OR status = 'banned'").get() as any).count;
+
+    const receivedFlagged = receivedComments?.flagged || 0;
+    
+    let riskLevel = "Safe";
+    if (receivedFlagged > 10) riskLevel = "High Risk";
+    else if (receivedFlagged >= 3) riskLevel = "Medium";
+
+    res.json({
+        riskLevel,
+        postsCount: totalPosts,
+        receivedFlagged,
+        userStrikes: user.strikes,
+        blockedUsersCount: blockedUsers,
+        status: user.status
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -722,26 +773,19 @@ async function startServer() {
 
   // ─── Model Retrain ────────────────────────────────────────────────────
   app.post("/api/admin/model-retrain", async (_req, res) => {
-    const { exec } = await import("child_process");
-    console.log("🔄 Starting model retraining...");
-
-    exec("python ml/train_model.py", { cwd: __dirname }, async (error, stdout, stderr) => {
-      if (error) {
-        console.error(`❌ Training failed: ${error.message}`);
-        return res.status(500).json({ error: "Training failed", details: error.message });
+    console.log("🔄 Requesting model retraining from ML API...");
+    try {
+      const mlRes = await fetch(`${ML_API_URL}/retrain`, { method: "POST" });
+      if (!mlRes.ok) {
+         const err = await mlRes.json().catch(() => ({}));
+         throw new Error(err.error || "ML API training failed");
       }
-      console.log(`✅ Training complete: ${stdout}`);
-      
-      try {
-        // Notify Flask API to reload
-        const reloadRes = await fetch(`${ML_API_URL}/reload`, { method: "POST" });
-        if (!reloadRes.ok) throw new Error("Failed to reload ML API");
-        const reloadData = await reloadRes.json();
-        res.json({ success: true, message: "Model retrained and reloaded successfully", metrics: reloadData });
-      } catch (err: any) {
-        res.status(500).json({ error: "Retrained but failed to reload", details: err.message });
-      }
-    });
+      const data = await mlRes.json();
+      res.json({ success: true, message: "Model retrained securely", metrics: data.metrics });
+    } catch (err: any) {
+      console.error("❌ Retrain error:", err.message);
+      res.status(500).json({ error: "Training failed", details: err.message });
+    }
   });
 
   // ═══════════════════════════════════════════════════════════════════════

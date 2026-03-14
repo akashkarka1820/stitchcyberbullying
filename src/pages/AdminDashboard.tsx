@@ -142,7 +142,7 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
               { label: 'Total Users', value: stats.totalUsers, icon: Users, color: 'blue' },
               { label: 'Total Posts', value: stats.totalPosts, icon: MessageSquare, color: 'green' },
               { label: 'AI Violations', value: stats.totalViolations, icon: AlertTriangle, color: 'amber' },
-              { label: 'Active Strikes', value: stats.activeStrikes, icon: ShieldAlert, color: 'red' }
+              { label: 'Blocked Users', value: stats.blockedUsers, icon: ShieldAlert, color: 'red' }
             ].map((stat) => (
               <div key={stat.label} className="bg-slate-900 border border-slate-800 p-6 rounded-2xl">
                 <div className="flex justify-between items-start mb-4">
@@ -206,8 +206,7 @@ export default function AdminDashboard({ user, onLogout }: AdminDashboardProps) 
                       const res = await fetch('/api/admin/model-retrain', { method: 'POST' });
                       const data = await res.json();
                       if (res.ok) {
-                        alert("✅ Retraining complete! Metrics updated.");
-                        window.location.reload();
+                        setModelMetrics(data.metrics);
                       } else {
                         alert("❌ Training failed: " + data.error);
                       }

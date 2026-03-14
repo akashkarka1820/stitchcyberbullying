@@ -1,5 +1,6 @@
 import { useNavigate, Link } from 'react-router-dom';
-import { Settings, LogOut, ShieldCheck, ChevronRight, Grid, List, Heart, Plus, Home, Compass, Shield, User as UserIcon } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Settings, LogOut, ShieldCheck, ChevronRight, Grid, List, Heart, Plus, Home, Compass, Shield, User as UserIcon, Trash2 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { User } from '../types';
 
@@ -10,10 +11,32 @@ interface ProfileProps {
 
 export default function Profile({ user, onLogout }: ProfileProps) {
   const navigate = useNavigate();
+  const [userPosts, setUserPosts] = useState<any[]>([]);
+
+  useEffect(() => {
+    fetch('/api/posts')
+      .then(res => res.json())
+      .then(data => {
+        setUserPosts(data.filter((post: any) => post.user_id === user.id));
+      })
+      .catch(err => console.error(err));
+  }, [user.id]);
 
   const handleLogout = () => {
     onLogout();
     navigate('/');
+  };
+
+  const handleDeletePost = async (postId: number) => {
+    if (!confirm('Are you sure you want to delete this post?')) return;
+    try {
+      const res = await fetch(`/api/posts/${postId}`, { method: 'DELETE' });
+      if (res.ok) {
+        setUserPosts(prev => prev.filter(p => p.id !== postId));
+      }
+    } catch (err) {
+      console.error('Delete failed', err);
+    }
   };
 
   return (
@@ -97,19 +120,37 @@ export default function Profile({ user, onLogout }: ProfileProps) {
             </div>
           </div>
           <div className="grid grid-cols-3 gap-2">
-            {[1, 2, 3, 4, 5, 6].map((i) => (
-              <div key={i} className="aspect-square bg-slate-100 dark:bg-slate-800 rounded-lg overflow-hidden group cursor-pointer relative">
+            {userPosts.map((post) => (
+              <div key={post.id} className="aspect-square bg-slate-100 dark:bg-slate-800 rounded-lg overflow-hidden group cursor-pointer relative">
                 <img 
-                  src={`https://picsum.photos/seed/profile-${i}/400/400`} 
+                  src={post.image_url} 
                   alt="Post" 
                   className="size-full object-cover" 
                   referrerPolicy="no-referrer"
                 />
-                <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                  <Heart className="w-6 h-6 text-white fill-white" />
+                {/* Hover overlay */}
+                <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {/* Likes count at bottom */}
+                  <div className="absolute bottom-2 left-2 flex items-center gap-1">
+                    <Heart className="w-4 h-4 text-white fill-white" />
+                    <span className="text-white text-xs font-bold">{post.likes_count}</span>
+                  </div>
+                  {/* Delete button at top-right */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleDeletePost(post.id); }}
+                    className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white rounded-full p-1.5 shadow-lg transition-colors"
+                    title="Delete post"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
             ))}
+            {userPosts.length === 0 && (
+              <div className="col-span-3 text-center py-6 text-slate-500 text-sm">
+                You haven't posted any photos yet.
+              </div>
+            )}
           </div>
         </section>
       </main>

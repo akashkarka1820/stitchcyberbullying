@@ -67,16 +67,16 @@ export default function Login({ onLogin }: LoginProps) {
               )}
               
               <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Email Address</label>
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Email or Username</label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
                   <input 
-                    type="email"
+                    type="text"
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="w-full pl-10 pr-4 h-12 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-primary focus:border-primary transition-all"
-                    placeholder="name@example.com"
+                    placeholder="name@example.com or username"
                   />
                 </div>
               </div>

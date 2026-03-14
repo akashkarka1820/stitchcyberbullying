@@ -1,5 +1,6 @@
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Settings, Check, ShieldCheck, Users, MessageSquare, BookOpen, Headset, Home, Shield, History, HelpCircle, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Settings, Check, ShieldCheck, Users, MessageSquare, BookOpen, Headset, Home, Shield, History, HelpCircle, ChevronRight, AlertTriangle } from 'lucide-react';
 import { motion } from 'motion/react';
 import { User } from '../types';
 
@@ -8,6 +9,43 @@ interface SafetyHubProps {
 }
 
 export default function SafetyHub({ user }: SafetyHubProps) {
+  const [stats, setStats] = useState<any>(null);
+
+  useEffect(() => {
+    fetch(`/api/users/${user.id}/safety-stats`)
+      .then(res => res.json())
+      .then(data => setStats(data))
+      .catch(err => console.error("Could not fetch safety stats", err));
+  }, [user.id]);
+
+  const riskLevel = stats?.riskLevel || 'Safe';
+  
+  const riskConfig = {
+    'High Risk': { 
+      width: '90%', 
+      bgBadge: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400', 
+      bgMeter: 'bg-red-500', 
+      iconColor: 'text-red-500', 
+      bgIconBox: 'bg-red-500 border-2 border-white dark:border-slate-900' 
+    },
+    'Medium': { 
+      width: '50%', 
+      bgBadge: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400', 
+      bgMeter: 'bg-amber-500', 
+      iconColor: 'text-amber-500', 
+      bgIconBox: 'bg-amber-500 border-2 border-white dark:border-slate-900' 
+    },
+    'Safe': { 
+      width: '15%', 
+      bgBadge: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400', 
+      bgMeter: 'bg-green-500', 
+      iconColor: 'text-green-500', 
+      bgIconBox: 'bg-green-500 border-2 border-white dark:border-slate-900' 
+    }
+  };
+  
+  const currentRisk = riskConfig[riskLevel as keyof typeof riskConfig] || riskConfig['Safe'];
+
   return (
     <div className="relative flex h-auto min-h-screen w-full max-w-md mx-auto flex-col bg-background-light dark:bg-background-dark shadow-xl overflow-x-hidden">
       {/* Header */}
@@ -31,14 +69,14 @@ export default function SafetyHub({ user }: SafetyHubProps) {
               <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}`} alt="Profile" className="w-full h-full" referrerPolicy="no-referrer" />
             </div>
           </div>
-          <div className="absolute bottom-1 right-1 bg-green-500 h-6 w-6 rounded-full border-2 border-white dark:border-slate-900 flex items-center justify-center">
-            <Check className="text-white w-3 h-3 font-bold" />
+          <div className={`absolute bottom-1 right-1 h-6 w-6 rounded-full flex items-center justify-center ${currentRisk.bgIconBox}`}>
+            {riskLevel === 'Safe' ? <Check className="text-white w-3 h-3 font-bold" /> : <AlertTriangle className="text-white w-3 h-3 font-bold" />}
           </div>
         </div>
         <div className="text-center">
-          <p className="text-slate-900 dark:text-white text-2xl font-bold font-display">Safety Status: Protected</p>
-          <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">Your privacy controls are working effectively</p>
-          <p className="text-slate-400 dark:text-slate-500 text-xs mt-1">Last checked: 2 mins ago</p>
+          <p className="text-slate-900 dark:text-white text-2xl font-bold font-display">Safety Status: {stats?.status === 'active' ? 'Protected' : 'Restricted'}</p>
+          <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">{stats?.status === 'active' ? 'Your privacy controls are working effectively' : 'Your account is currently restricted'}</p>
+          <p className="text-slate-400 dark:text-slate-500 text-xs mt-1">Last checked: Just now</p>
         </div>
       </div>
 
@@ -47,13 +85,14 @@ export default function SafetyHub({ user }: SafetyHubProps) {
         <div className="bg-white dark:bg-slate-900 p-4 rounded-xl shadow-sm border border-slate-100 dark:border-slate-800">
           <div className="flex justify-between items-center mb-3">
             <h3 className="text-slate-900 dark:text-white text-base font-bold font-display">Current Risk Level</h3>
-            <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-xs font-bold rounded">LOW</span>
+            <span className={`px-2 py-1 text-xs font-bold rounded uppercase ${currentRisk.bgBadge}`}>{riskLevel}</span>
           </div>
           <div className="relative w-full h-3 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
             <motion.div 
               initial={{ width: 0 }}
-              animate={{ width: '15%' }}
-              className="absolute top-0 left-0 h-full bg-green-500 rounded-full"
+              animate={{ width: currentRisk.width }}
+              className={`absolute top-0 left-0 h-full rounded-full ${currentRisk.bgMeter}`}
+              transition={{ duration: 1 }}
             ></motion.div>
           </div>
           <div className="flex justify-between mt-2">
@@ -61,8 +100,13 @@ export default function SafetyHub({ user }: SafetyHubProps) {
             <p className="text-slate-500 dark:text-slate-400 text-xs">High Risk</p>
           </div>
           <p className="text-slate-600 dark:text-slate-300 text-sm mt-3 flex items-center gap-2">
-            <ShieldCheck className="text-green-500 w-5 h-5" />
-            No immediate threats detected in your network.
+            {riskLevel === 'Safe' ? (
+              <><ShieldCheck className="text-green-500 w-5 h-5 flex-shrink-0" />
+              No immediate threats detected in your network.</>
+            ) : (
+              <><AlertTriangle className={`${currentRisk.iconColor} w-5 h-5 flex-shrink-0`} />
+              Threats detected. You received {stats?.receivedFlagged} flagged comments.</>
+            )}
           </p>
         </div>
       </div>
@@ -75,7 +119,7 @@ export default function SafetyHub({ user }: SafetyHubProps) {
           </div>
           <div className="flex-1 text-left">
             <p className="font-bold text-slate-900 dark:text-white text-sm">Blocked Users</p>
-            <p className="text-slate-500 dark:text-slate-400 text-xs">12 accounts currently restricted</p>
+            <p className="text-slate-500 dark:text-slate-400 text-xs">{stats?.blockedUsersCount || 0} accounts currently restricted across platform</p>
           </div>
           <ChevronRight className="w-5 h-5 text-slate-400" />
         </button>
@@ -86,7 +130,7 @@ export default function SafetyHub({ user }: SafetyHubProps) {
           </div>
           <div className="flex-1 text-left">
             <p className="font-bold text-slate-900 dark:text-white text-sm">Moderated Comments</p>
-            <p className="text-slate-500 dark:text-slate-400 text-xs">8 harmful messages filtered</p>
+            <p className="text-slate-500 dark:text-slate-400 text-xs">{stats?.receivedFlagged || 0} harmful messages filtered on your ({stats?.postsCount || 0}) posts</p>
           </div>
           <ChevronRight className="w-5 h-5 text-slate-400" />
         </button>

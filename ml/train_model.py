@@ -51,7 +51,18 @@ def load_and_prepare_data():
     df['label'] = df['cyberbullying_type'].apply(
         lambda x: 0 if x == 'not_cyberbullying' else 1
     )
-    print(f"\n📊 Binary distribution:")
+    
+    # Balance the dataset (Downsample cyberbullying class to match not_cyberbullying)
+    df_majority = df[df.label == 1]
+    df_minority = df[df.label == 0]
+    
+    # Downsample majority class
+    df_majority_downsampled = df_majority.sample(n=len(df_minority), random_state=42)
+    
+    # Combine minority class with downsampled majority class
+    df = pd.concat([df_majority_downsampled, df_minority]).sample(frac=1, random_state=42).reset_index(drop=True)
+
+    print(f"\n📊 Balanced Binary distribution:")
     print(f"   Not cyberbullying: {(df['label'] == 0).sum()}")
     print(f"   Cyberbullying:     {(df['label'] == 1).sum()}")
 
