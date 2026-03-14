@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import Database from "better-sqlite3";
 import dotenv from "dotenv";
 import crypto from "crypto";
+import { spawn } from "child_process";
 
 dotenv.config();
 
@@ -35,12 +36,7 @@ async function analyzeText(text: string) {
     return await res.json();
   } catch (err) {
     console.error("ML API unavailable:", err);
-    // Fallback: allow the comment (ML service down)
-    return {
-      prediction: "not_cyberbullying",
-      is_cyberbullying: false,
-      confidence: 0,
-    };
+    throw new Error("Cyberbullying detection service is currently unavailable. Please try again later.");
   }
 }
 
@@ -212,6 +208,20 @@ function isUserBlocked(userId: number): { blocked: boolean; message: string } {
 async function startServer() {
   const app = express();
   const PORT = 3000;
+
+  // ─── Start ML API ──────────────────────────────────────────────────────
+  const mlProcess = spawn("python", ["ml/api.py"], { stdio: "inherit" });
+  mlProcess.on("error", (err) => {
+    console.error("Failed to start ML API:", err);
+  });
+  mlProcess.on("close", (code) => {
+    console.warn(`ML API stopped with code ${code}`);
+  });
+
+  // Ensure mlProcess is killed when node exits
+  process.on("exit", () => mlProcess.kill());
+  process.on("SIGINT", () => { mlProcess.kill(); process.exit(); });
+  process.on("SIGTERM", () => { mlProcess.kill(); process.exit(); });
 
   app.use(express.json({ limit: "10mb" }));
 
@@ -438,9 +448,9 @@ async function startServer() {
         analysis: { is_cyberbullying: false, confidence, prediction: analysis.prediction },
         moderation: null,
       });
-    } catch (e) {
+    } catch (e: any) {
       console.error("Comment error:", e);
-      res.status(500).json({ error: "Failed to post comment" });
+      res.status(503).json({ error: e.message || "Failed to post comment" });
     }
   });
 
@@ -449,16 +459,20 @@ async function startServer() {
     const { text } = req.body;
     if (!text) return res.status(400).json({ error: "text is required" });
 
-    const analysis = await analyzeText(text);
-    res.json({
-      safe: !analysis.is_cyberbullying,
-      is_cyberbullying: analysis.is_cyberbullying,
-      confidence: analysis.confidence,
-      prediction: analysis.prediction,
-      reason: analysis.is_cyberbullying
-        ? "This content may contain harmful or offensive language. Please revise your message."
-        : "Content looks safe and positive! 🌟",
-    });
+    try {
+      const analysis = await analyzeText(text);
+      res.json({
+        safe: !analysis.is_cyberbullying,
+        is_cyberbullying: analysis.is_cyberbullying,
+        confidence: analysis.confidence,
+        prediction: analysis.prediction,
+        reason: analysis.is_cyberbullying
+          ? "This content may contain harmful or offensive language. Please revise your message."
+          : "Content looks safe and positive! 🌟",
+      });
+    } catch (e: any) {
+      res.status(503).json({ error: e.message || "ML API Unavailable" });
+    }
   });
 
   // ═══════════════════════════════════════════════════════════════════════

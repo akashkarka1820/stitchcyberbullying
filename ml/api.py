@@ -139,7 +139,7 @@ def predict():
     is_cyberbullying = bool(prediction == 1)
 
     # Manual override for obvious test phrases that might slip past the ML model
-    obvious_insults = ['idiot', 'stupid', 'dumb', 'hell', 'die', 'kill', 'loser', 'ugly', 'hate']
+    obvious_insults = ['idiot', 'stupid', 'dumb', 'hell', 'die', 'kill', 'loser', 'ugly', 'hate', 'fuck', 'bitch', 'shit', 'cunt', 'asshole']
     if any(insult in cleaned.split() for insult in obvious_insults) or "go to hell" in cleaned:
         is_cyberbullying = True
         confidence = max(confidence, 0.95)
