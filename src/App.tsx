@@ -19,14 +19,17 @@ import NewPost from './pages/NewPost';
 import { User } from './types';
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
-
-  useEffect(() => {
+  const [user, setUser] = useState<User | null>(() => {
     const savedUser = localStorage.getItem('user');
     if (savedUser) {
-      setUser(JSON.parse(savedUser));
+      try {
+        return JSON.parse(savedUser);
+      } catch (e) {
+        return null;
+      }
     }
-  }, []);
+    return null;
+  });
 
   const login = (userData: User) => {
     setUser(userData);
@@ -42,9 +45,9 @@ export default function App() {
     <Router>
       <Routes>
         <Route path="/" element={<Landing />} />
-        <Route path="/login" element={<Login onLogin={login} />} />
-        <Route path="/register" element={<Register onLogin={login} />} />
-        <Route path="/admin/login" element={<AdminLogin onLogin={login} />} />
+        <Route path="/login" element={user ? <Navigate to="/home" /> : <Login onLogin={login} />} />
+        <Route path="/register" element={user ? <Navigate to="/home" /> : <Register onLogin={login} />} />
+        <Route path="/admin/login" element={user ? <Navigate to="/admin/dashboard" /> : <AdminLogin onLogin={login} />} />
         
         {/* Protected Routes */}
         <Route path="/home" element={user ? <Home user={user} onLogout={logout} /> : <Navigate to="/login" />} />
